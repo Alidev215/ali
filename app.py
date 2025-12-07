@@ -1,179 +1,194 @@
 from flask import Flask, request, jsonify, render_template_string
-import csv, os, json
-from datetime import datetime
+from datetime import datetime, timedelta
+import csv, os
 
 app = Flask(__name__)
 
-DATA_FILE = 'data.csv'
-STATUS_FILE = 'status.json'  # فایل ذخیره وضعیت LED
+DATA_FILE = "data.csv"
 
-# 🔹 اگر فایل CSV وجود ندارد، ایجادش کن
+# مسیر فایل داده را اگر وجود ندارد بساز
 if not os.path.exists(DATA_FILE):
+    with open(DATA_FILE, "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerow(["Date", "Time", "Temperature", "Humidity"])
+
+# تابع زمان ایران (+3:30)
+def get_iran_time():
+    utc_now = datetime.utcnow()
+    iran_time = utc_now + timedelta(hours=3, minutes=30)
+    return iran_time.strftime("%Y-%m-%d"), iran_time.strftime("%H:%M:%S")
+
+@app.route("/")
+def home():
+    return "<h3>✅ Flask Server is Running - ESP32 Project</h3><a href='/dashboard'>Go to Dashboard</a>"
+
+@app.route("/data", methods=["POST"])
+def data():
+    temp = request.form.get("temperature")
+    hum = request.form.get("humidity")
+
+    date, time = get_iran_time()
+
+    with open(DATA_FILE, "a", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerow([date, time, temp, hum])
+
+    print(f"✅ {date} {time} | Temp: {temp} °C | Hum: {hum} %")
+    return "Data saved successfully"
+
+@app.route("/get_data")
+def get_data():
+    data = []
+    with open(DATA_FILE, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            data.append(row)
+    return jsonify(data)
+
+# پاک کردن تمام داده‌ها (CSV ریست میشه)
+@app.route('/clear_data', methods=['POST'])
+def clear_data():
     with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
         csv.writer(f).writerow(['Date', 'Time', 'Temperature', 'Humidity'])
+    return jsonify({"message": "✅ تمام داده‌ها با موفقیت حذف شدند"})
 
-# 🔹 بارگزاری یا مقداردهی اولیه وضعیت LED
-if os.path.exists(STATUS_FILE):
-    with open(STATUS_FILE, 'r') as f:
-        try:
-            led_status = json.load(f).get('led', False)
-        except Exception:
-            led_status = False
-else:
-    led_status = False
+# وضعیت LED
+LED_STATE = {"status": False}
 
-# 🏠 صفحه‌ی اصلی سرور
-@app.route('/')
-def home():
-    return "✅ ESP32 Cloud Server is running!"
+@app.route("/led/<state>", methods=["POST"])
+def led_control(state):
+    if state.lower() == "on":
+        LED_STATE["status"] = True
+    elif state.lower() == "off":
+        LED_STATE["status"] = False
+    return jsonify(LED_STATE)
 
-# 📩 دریافت داده از ESP32 (دما و رطوبت)
-@app.route('/data', methods=['POST'])
-def receive_data():
-    data = request.get_json(force=True)
-    now = datetime.now()
-    with open(DATA_FILE, 'a', newline='', encoding='utf-8') as f:
-        csv.writer(f).writerow([
-            now.strftime("%Y-%m-%d"),
-            now.strftime("%H:%M:%S"),
-            data.get('temperature'),
-            data.get('humidity')
-        ])
-    return jsonify({"message": "Data received"}), 200
+@app.route("/led_status")
+def led_status():
+    return jsonify(LED_STATE)
 
-# 📊 ارسال داده‌ها برای نمودارها
-@app.route('/get_data')
-def get_data():
-    result = []
-    with open(DATA_FILE, 'r', encoding='utf-8') as f:
-        for r in csv.DictReader(f):
-            result.append(r)
-    return jsonify(result)
-
-# ⚙️ وضعیت فعلی LED (برای ESP32)
-@app.route('/get_led_status')
-def get_led_status():
-    return jsonify({"led": led_status})
-
-# 🎛 دکمه روشن/خاموش LED (از مرورگر یا ESP)
-@app.route('/toggle_led', methods=['GET', 'POST'])
-def toggle_led():
-    global led_status
-    led_status = not led_status
-    with open(STATUS_FILE, 'w') as f:
-        json.dump({"led": led_status}, f)
-    return jsonify({"led": led_status})
-
-# 🌡 داشبورد زنده با نمودارها و کنترل LED
-@app.route('/dashboard')
+# داشبورد (Dark Mode)
+@app.route("/dashboard")
 def dashboard():
-    html = """
-    <html>
-    <head>
-      <title>ESP32 Dashboard - Cloud Control</title>
-      <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-      <style>
+    return render_template_string("""
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>ESP32 Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
         body {
-          font-family: 'Segoe UI', sans-serif;
-          background-color: #f8f9fa;
-          text-align: center;
-          margin-top: 40px;
+            background-color: #0f1117;
+            color: #fff;
+            font-family: 'Vazirmatn', sans-serif;
+            text-align: center;
+            padding: 20px;
         }
-        h1 { color: #333; }
+        h1 { color: #4FC3F7; }
+        canvas {
+            background-color: #1e1e2f;
+            border-radius: 10px;
+            padding: 10px;
+        }
         .btn {
-          background: #0078d7; color: white;
-          border: none; padding: 10px 30px; border-radius: 8px;
-          cursor: pointer; font-size: 16px; margin-bottom: 20px;
-          transition: background-color 0.3s ease;
+            margin: 6px;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
         }
-        .btn.on { background: #d9534f; }
-        canvas { margin: 20px auto; display: block; }
-        footer { margin-top: 40px; color: #666; font-size: 14px; }
-      </style>
-    </head>
-    <body>
-      <h1>ESP32 💡 Live Dashboard + LED Control</h1>
-      <button id="ledBtn" class="btn" onclick="toggleLED()">Toggle LED</button>
+        .btn.on { background-color: #4CAF50; color: white; }
+        .btn.off { background-color: #f44336; color: white; }
+        .btn.danger { background-color: #d9534f; color: white; }
+        .btn.danger:hover { background-color: #c9302c; }
+        table {
+            margin: 20px auto;
+            border-collapse: collapse;
+            width: 70%;
+        }
+        th, td {
+            border: 1px solid #444;
+            padding: 8px;
+        }
+    </style>
+</head>
+<body>
+    <h1>📊 داشبورد آنلاین ESP32</h1>
+    <button class="btn on" onclick="toggleLED('on')">روشن کردن LED 💡</button>
+    <button class="btn off" onclick="toggleLED('off')">خاموش کردن LED 💤</button>
+    <button class="btn danger" onclick="clearData()">🗑 پاک کردن داده‌ها</button>
 
-      <div>
-        <canvas id="tempChart" width="600" height="250"></canvas>
-        <canvas id="humChart" width="600" height="250"></canvas>
-      </div>
+    <canvas id="tempChart" width="400" height="180"></canvas>
+    <canvas id="humChart" width="400" height="180"></canvas>
 
-      <footer>Made with ❤️ by Alldev215</footer>
+    <h3>📅 آخرین مقادیر دریافتی</h3>
+    <table id="dataTable">
+        <thead><tr><th>تاریخ</th><th>ساعت</th><th>دما (°C)</th><th>رطوبت (%)</th></tr></thead>
+        <tbody></tbody>
+    </table>
 
-      <script>
-      async function fetchData(){
-          const res = await fetch('/get_data');
-          return res.json();
-      }
+    <script>
+        const tempCtx = document.getElementById('tempChart').getContext('2d');
+        const humCtx = document.getElementById('humChart').getContext('2d');
 
-      async function fetchLED(){
-          const res = await fetch('/get_led_status');
-          const state = await res.json();
-          const btn = document.getElementById('ledBtn');
-          btn.textContent = state.led ? 'LED is ON - Click to turn OFF' : 'LED is OFF - Click to turn ON';
-          btn.className = state.led ? 'btn on' : 'btn';
-      }
+        const tempChart = new Chart(tempCtx, {
+            type: 'line',
+            data: { labels: [], datasets: [{ label: 'دما (°C)', borderColor: '#FF9800', data: [], fill: false }] },
+            options: { scales: { y: { beginAtZero: true } } }
+        });
 
-      async function toggleLED(){
-          await fetch('/toggle_led', { method: 'POST' });
-          await fetchLED();
-      }
+        const humChart = new Chart(humCtx, {
+            type: 'line',
+            data: { labels: [], datasets: [{ label: 'رطوبت (%)', borderColor: '#03A9F4', data: [], fill: false }] },
+            options: { scales: { y: { beginAtZero: true } } }
+        });
 
-      async function updateCharts(){
-          const data = await fetchData();
-          const times = data.map(r => r.Time);
-          const temps = data.map(r => parseFloat(r.Temperature));
-          const hums = data.map(r => parseFloat(r.Humidity));
+        async function updateCharts() {
+            const res = await fetch('/get_data');
+            const data = await res.json();
 
-          tempChart.data.labels = times;
-          tempChart.data.datasets[0].data = temps;
-          tempChart.update();
+            const labels = data.map(d => `${d.Date} ${d.Time}`);
+            const temps = data.map(d => d.Temperature);
+            const hums = data.map(d => d.Humidity);
 
-          humChart.data.labels = times;
-          humChart.data.datasets[0].data = hums;
-          humChart.update();
-      }
+            tempChart.data.labels = labels;
+            tempChart.data.datasets[0].data = temps;
+            humChart.data.labels = labels;
+            humChart.data.datasets[0].data = hums;
 
-      const tempChart = new Chart(document.getElementById('tempChart'), {
-          type: 'line',
-          data: {
-              labels: [],
-              datasets: [{
-                  label: 'Temperature (°C)',
-                  borderColor: '#ff5733',
-                  backgroundColor: 'rgba(255,87,51,0.2)',
-                  data: []
-              }]
-          },
-          options: { scales: { y: { beginAtZero: false } } }
-      });
+            tempChart.update();
+            humChart.update();
 
-      const humChart = new Chart(document.getElementById('humChart'), {
-          type: 'line',
-          data: {
-              labels: [],
-              datasets: [{
-                  label: 'Humidity (%)',
-                  borderColor: '#0078d7',
-                  backgroundColor: 'rgba(0,120,215,0.2)',
-                  data: []
-              }]
-          },
-          options: { scales: { y: { beginAtZero: false } } }
-      });
+            const tableBody = document.querySelector('#dataTable tbody');
+            tableBody.innerHTML = '';
+            data.slice(-10).reverse().forEach(row => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>${row.Date}</td><td>${row.Time}</td><td>${row.Temperature}</td><td>${row.Humidity}</td>`;
+                tableBody.appendChild(tr);
+            });
+        }
 
-      setInterval(updateCharts, 5000);
-      setInterval(fetchLED, 5000);
-      updateCharts();
-      fetchLED();
-      </script>
-    </body>
-    </html>
-    """
-    return render_template_string(html)
+        async function toggleLED(state) {
+            await fetch(`/led/${state}`, { method: 'POST' });
+            alert(state === 'on' ? "💡 LED روشن شد" : "💤 LED خاموش شد");
+        }
 
-# 🚀 اجرای سرور
+        async function clearData() {
+            if (confirm("آیا مطمئنی می‌خوای تمام داده‌ها حذف بشن؟")) {
+                const res = await fetch('/clear_data', { method: 'POST' });
+                const result = await res.json();
+                alert(result.message);
+                await updateCharts();
+            }
+        }
+
+        updateCharts();
+        setInterval(updateCharts, 600000); // هر 10 دقیقه
+    </script>
+</body>
+</html>
+""")
+
+# ران در حالت محلی
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host="0.0.0.0", port=5000)
