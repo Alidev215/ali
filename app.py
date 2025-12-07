@@ -6,12 +6,10 @@ app = Flask(__name__)
 
 DATA_FILE = "data.csv"
 
-# اگر فایل داده وجود ندارد ایجاد شود
 if not os.path.exists(DATA_FILE):
     with open(DATA_FILE, "w", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow(["Date", "Time", "Temperature", "Humidity"])
+        csv.writer(f).writerow(["Date", "Time", "Temperature", "Humidity", "Motion"])  # 💬 ستون جدید برای Motion
 
-# دریافت زمان ایران (+3:30)
 def get_iran_time():
     utc_now = datetime.utcnow()
     iran_time = utc_now + timedelta(hours=3, minutes=30)
@@ -21,21 +19,21 @@ def get_iran_time():
 def home():
     return "<h3>✅ Flask Server is Running - ESP32 Project</h3><a href='/dashboard'>Go to Dashboard</a>"
 
-# دریافت داده‌ها از ESP32
+# 💬 مسیر دریافت داده از ESP32
 @app.route("/data", methods=["POST"])
 def data():
     temp = request.form.get("temperature")
     hum = request.form.get("humidity")
+    motion = request.form.get("motion", "0")  # 💬 اگر ارسال نشده بود پیش‌فرض ۰ باشه
 
     date, time = get_iran_time()
 
     with open(DATA_FILE, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow([date, time, temp, hum])
+        csv.writer(f).writerow([date, time, temp, hum, motion])
 
-    print(f"✅ {date} {time} | Temp: {temp} °C | Hum: {hum} %")
+    print(f"✅ {date} {time} | Temp: {temp}°C | Hum: {hum}% | Motion: {motion}")
     return "Data saved successfully"
 
-# گرفتن داده‌ها برای نمایش در dashboard
 @app.route("/get_data")
 def get_data():
     data = []
@@ -45,14 +43,12 @@ def get_data():
             data.append(row)
     return jsonify(data)
 
-# پاک کردن تمام داده‌ها
 @app.route('/clear_data', methods=['POST'])
 def clear_data():
     with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
-        csv.writer(f).writerow(['Date', 'Time', 'Temperature', 'Humidity'])
+        csv.writer(f).writerow(['Date', 'Time', 'Temperature', 'Humidity', 'Motion'])
     return jsonify({"message": "✅ تمام داده‌ها با موفقیت حذف شدند"})
 
-# وضعیت LED ذخیره می‌شود در حافظه سرور
 LED_STATE = {"status": False}
 
 @app.route("/led/<state>", methods=["POST"])
@@ -63,141 +59,155 @@ def led_control(state):
         LED_STATE["status"] = False
     return jsonify(LED_STATE)
 
-# مسیر برای dashboard و مرورگر
 @app.route("/led_status")
 def led_status():
     return jsonify(LED_STATE)
 
-# 🔧 مسیر جدید مخصوص ESP32
-# این مسیر مشکل 404 را حل می‌کند
 @app.route("/get_led_status")
 def get_led_status():
     return jsonify({"led": LED_STATE["status"]})
 
-# داشبورد آنلاین
+# 🔥 متغیر جدید برای کنترل نظارت حرکتی
+MOTION_MONITOR = {"enabled": True, "last": 0}  # last = آخرین وضعیت دیده شده
+
+@app.route("/motion/<state>", methods=["POST"])
+def motion_control(state):
+    if state.lower() == "on":
+        MOTION_MONITOR["enabled"] = True
+    elif state.lower() == "off":
+        MOTION_MONITOR["enabled"] = False
+    return jsonify(MOTION_MONITOR)
+
+@app.route("/motion_status")
+def motion_status():
+    return jsonify(MOTION_MONITOR)
+
+# 💻 Dashboard
 @app.route("/dashboard")
 def dashboard():
     return render_template_string("""
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <title>ESP32 Dashboard</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body {
-            background-color: #0f1117;
-            color: #fff;
-            font-family: 'Vazirmatn', sans-serif;
-            text-align: center;
-            padding: 20px;
-        }
-        h1 { color: #4FC3F7; }
-        canvas {
-            background-color: #1e1e2f;
-            border-radius: 10px;
-            padding: 10px;
-        }
-        .btn {
-            margin: 6px;
-            padding: 10px 16px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: bold;
-        }
-        .btn.on { background-color: #4CAF50; color: white; }
-        .btn.off { background-color: #f44336; color: white; }
-        .btn.danger { background-color: #d9534f; color: white; }
-        .btn.danger:hover { background-color: #c9302c; }
-        table {
-            margin: 20px auto;
-            border-collapse: collapse;
-            width: 70%;
-        }
-        th, td {
-            border: 1px solid #444;
-            padding: 8px;
-        }
-    </style>
+<meta charset="UTF-8">
+<title>ESP32 Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body {
+    background-color: #0f1117;
+    color: #fff;
+    font-family: 'Vazirmatn', sans-serif;
+    text-align: center;
+    padding: 20px;
+}
+h1 { color: #4FC3F7; }
+canvas {
+    background-color: #1e1e2f;
+    border-radius: 10px;
+    padding: 10px;
+}
+.btn {
+    margin: 6px;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+}
+.btn.on { background-color: #4CAF50; color: white; }
+.btn.off { background-color: #f44336; color: white; }
+.btn.danger { background-color: #d9534f; color: white; }
+.motion-box {
+    margin: 20px auto;
+    width: 50%;
+    padding: 10px;
+    border-radius: 8px;
+    background: #1d1e2f;
+}
+.motion-active { color: #ff5252; font-weight: bold; }
+.motion-inactive { color: #4caf50; }
+</style>
 </head>
 <body>
-    <h1>📊 داشبورد آنلاین ESP32</h1>
+<h1>📊 داشبورد آنلاین ESP32</h1>
+
+<div>
     <button class="btn on" onclick="toggleLED('on')">روشن کردن LED 💡</button>
     <button class="btn off" onclick="toggleLED('off')">خاموش کردن LED 💤</button>
-    <button class="btn danger" onclick="clearData()">🗑 پاک کردن داده‌ها</button>
+</div>
 
-    <canvas id="tempChart" width="400" height="180"></canvas>
-    <canvas id="humChart" width="400" height="180"></canvas>
+<div>
+    <button class="btn on" onclick="toggleMotion('on')">✅ فعال‌سازی سنسور حرکت</button>
+    <button class="btn off" onclick="toggleMotion('off')">⛔ غیرفعال کردن سنسور حرکت</button>
+</div>
 
-    <h3>📅 آخرین مقادیر دریافتی</h3>
-    <table id="dataTable">
-        <thead><tr><th>تاریخ</th><th>ساعت</th><th>دما (°C)</th><th>رطوبت (%)</th></tr></thead>
-        <tbody></tbody>
-    </table>
+<button class="btn danger" onclick="clearData()">🗑 پاک کردن داده‌ها</button>
 
-    <script>
-        const tempCtx = document.getElementById('tempChart').getContext('2d');
-        const humCtx = document.getElementById('humChart').getContext('2d');
+<div class="motion-box" id="motionBox">
+    <h3>وضعیت حرکت:</h3>
+    <p id="motionStatus" class="motion-inactive">در حال انتظار...</p>
+</div>
 
-        const tempChart = new Chart(tempCtx, {
-            type: 'line',
-            data: { labels: [], datasets: [{ label: 'دما (°C)', borderColor: '#FF9800', data: [], fill: false }] },
-            options: { scales: { y: { beginAtZero: true } } }
-        });
+<canvas id="tempChart"></canvas>
+<canvas id="humChart"></canvas>
 
-        const humChart = new Chart(humCtx, {
-            type: 'line',
-            data: { labels: [], datasets: [{ label: 'رطوبت (%)', borderColor: '#03A9F4', data: [], fill: false }] },
-            options: { scales: { y: { beginAtZero: true } } }
-        });
+<script>
+const tempCtx = document.getElementById('tempChart').getContext('2d');
+const humCtx = document.getElementById('humChart').getContext('2d');
 
-        async function updateCharts() {
-            const res = await fetch('/get_data');
-            const data = await res.json();
+const tempChart = new Chart(tempCtx, {
+    type: 'line',
+    data: { labels: [], datasets: [{ label: 'دما (°C)', borderColor: '#FF9800', data: [], fill: false }] },
+});
+const humChart = new Chart(humCtx, {
+    type: 'line',
+    data: { labels: [], datasets: [{ label: 'رطوبت (%)', borderColor: '#03A9F4', data: [], fill: false }] },
+});
 
-            const labels = data.map(d => `${d.Date} ${d.Time}`);
-            const temps = data.map(d => d.Temperature);
-            const hums = data.map(d => d.Humidity);
+async function updateDashboard() {
+    const dataRes = await fetch('/get_data');
+    const data = await dataRes.json();
 
-            tempChart.data.labels = labels;
-            tempChart.data.datasets[0].data = temps;
-            humChart.data.labels = labels;
-            humChart.data.datasets[0].data = hums;
+    const labels = data.map(d => `${d.Date} ${d.Time}`);
+    const temps = data.map(d => d.Temperature);
+    const hums = data.map(d => d.Humidity);
+    const motions = data.map(d => d.Motion);
 
-            tempChart.update();
-            humChart.update();
+    tempChart.data.labels = labels;
+    tempChart.data.datasets[0].data = temps;
+    humChart.data.labels = labels;
+    humChart.data.datasets[0].data = hums;
+    tempChart.update();
+    humChart.update();
 
-            const tableBody = document.querySelector('#dataTable tbody');
-            tableBody.innerHTML = '';
-            data.slice(-10).reverse().forEach(row => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `<td>${row.Date}</td><td>${row.Time}</td><td>${row.Temperature}</td><td>${row.Humidity}</td>`;
-                tableBody.appendChild(tr);
-            });
-        }
+    // آخرین وضعیت حرکت
+    const lastMotion = motions[motions.length - 1];
+    const motionText = lastMotion === "1" ? "🚨 حرکت شناسایی شد!" : "✅ بدون حرکت";
+    const motionElem = document.getElementById('motionStatus');
+    motionElem.textContent = motionText;
+    motionElem.className = lastMotion === "1" ? "motion-active" : "motion-inactive";
+}
 
-        async function toggleLED(state) {
-            await fetch(`/led/${state}`, { method: 'POST' });
-            alert(state === 'on' ? "💡 LED روشن شد" : "💤 LED خاموش شد");
-        }
+async function toggleLED(state) {
+    await fetch(`/led/${state}`, {method:'POST'});
+}
+async function toggleMotion(state) {
+    await fetch(`/motion/${state}`, {method:'POST'});
+}
+async function clearData() {
+    if (confirm("آیا مطمئنی؟")) {
+        await fetch('/clear_data', {method:'POST'});
+        alert('✅ پاک شد');
+        updateDashboard();
+    }
+}
 
-        async function clearData() {
-            if (confirm("آیا مطمئنی می‌خوای تمام داده‌ها حذف بشن؟")) {
-                const res = await fetch('/clear_data', { method: 'POST' });
-                const result = await res.json();
-                alert(result.message);
-                await updateCharts();
-            }
-        }
-
-        updateCharts();
-        setInterval(updateCharts, 600000); // هر 10 دقیقه
-    </script>
+updateDashboard();
+setInterval(updateDashboard, 60000);
+</script>
 </body>
 </html>
 """)
 
-# اجرای Flask در Render یا لوکال
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
