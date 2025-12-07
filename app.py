@@ -1,8 +1,9 @@
 from flask import Flask, request, jsonify, render_template_string
-import csv, os
+import csv, os, json
 from datetime import datetime
 
 app = Flask(__name__)
+
 DATA_FILE = 'data.csv'
 STATUS_FILE = 'status.json'  # ✅ برای ذخیره وضعیت LED بین ری‌استارت‌ها
 
@@ -11,14 +12,17 @@ if not os.path.exists(DATA_FILE):
     with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
         csv.writer(f).writerow(['Date', 'Time', 'Temperature', 'Humidity'])
 
-# 🔹 مدیریت وضعیت LED با فایل
+# 🔹 بارگزاری یا مقداردهی اولیه وضعیت LED
 if os.path.exists(STATUS_FILE):
-    import json
     with open(STATUS_FILE, 'r') as f:
-        led_status = json.load(f).get('led', False)
+        try:
+            led_status = json.load(f).get('led', False)
+        except Exception:
+            led_status = False
 else:
     led_status = False
 
+# 🏠 صفحه اصلی
 @app.route('/')
 def home():
     return "✅ ESP32 Cloud Server is running."
@@ -37,7 +41,7 @@ def receive_data():
         ])
     return jsonify({"message": "Data received"}), 200
 
-# 📊 ارسال داده‌ها برای نمودار
+# 📊 ارسال همه‌ی داده‌ها (برای نمودار)
 @app.route('/get_data')
 def get_data():
     result = []
@@ -51,23 +55,22 @@ def get_data():
 def get_led_status():
     return jsonify({"led": led_status})
 
-# 🎛 تغییر وضعیت از طریق داشبورد
-@app.route('/toggle_led', methods=['POST'])
+# 🎛 تغییر وضعیت LED (برای مرورگر و ESP)
+@app.route('/toggle_led', methods=['GET', 'POST'])  # ✅ رفع خطای 405
 def toggle_led():
     global led_status
     led_status = not led_status
-    import json
     with open(STATUS_FILE, 'w') as f:
-        json.dump({"led": led_status}, f)  # ✅ ذخیره در فایل
+        json.dump({"led": led_status}, f)
     return jsonify({"led": led_status})
 
-# 🌡 داشبورد
+# 🌡 داشبورد زنده
 @app.route('/dashboard')
 def dashboard():
     html = """
     <html>
     <head>
-      <title>ESP32 Dashboard - Control</title>
+      <title>ESP32 Dashboard - Cloud Control</title>
       <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
       <style>
         body { font-family: 'Segoe UI', sans-serif; background-color: #f8f9fa; text-align: center; margin-top: 40px; }
@@ -93,6 +96,7 @@ def dashboard():
           const res = await fetch('/get_data');
           return await res.json();
       }
+
       async function fetchLED(){
           const res = await fetch('/get_led_status');
           const st = await res.json();
@@ -100,6 +104,7 @@ def dashboard():
           btn.textContent = st.led ? 'LED is ON - Click to turn OFF' : 'LED is OFF - Click to turn ON';
           btn.className = st.led ? 'btn on' : 'btn';
       }
+
       async function toggleLED(){
           await fetch('/toggle_led', { method: 'POST' });
           await fetchLED();
@@ -110,10 +115,14 @@ def dashboard():
           const times = data.map(r => r.Time);
           const temps = data.map(r => parseFloat(r.Temperature));
           const hums = data.map(r => parseFloat(r.Humidity));
+
           tempChart.data.labels = times;
-          tempChart.data.datasets[0].data = temps; tempChart.update();
+          tempChart.data.datasets[0].data = temps;
+          tempChart.update();
+
           humChart.data.labels = times;
-          humChart.data.datasets[0].data = hums; humChart.update();
+          humChart.data.datasets[0].data = hums;
+          humChart.update();
       }
 
       const tempChart = new Chart(document.getElementById('tempChart'), {
@@ -121,6 +130,7 @@ def dashboard():
           data: { labels: [], datasets: [{ label: 'Temperature (°C)', borderColor: '#ff5733', data: [] }] },
           options: { scales: { y: { beginAtZero: false } } }
       });
+
       const humChart = new Chart(document.getElementById('humChart'), {
           type: 'line',
           data: { labels: [], datasets: [{ label: 'Humidity (%)', borderColor: '#0078d7', data: [] }] },
