@@ -6,12 +6,12 @@ app = Flask(__name__)
 
 DATA_FILE = "data.csv"
 
-# مسیر فایل داده را اگر وجود ندارد بساز
+# اگر فایل داده وجود ندارد ایجاد شود
 if not os.path.exists(DATA_FILE):
     with open(DATA_FILE, "w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow(["Date", "Time", "Temperature", "Humidity"])
 
-# تابع زمان ایران (+3:30)
+# دریافت زمان ایران (+3:30)
 def get_iran_time():
     utc_now = datetime.utcnow()
     iran_time = utc_now + timedelta(hours=3, minutes=30)
@@ -21,6 +21,7 @@ def get_iran_time():
 def home():
     return "<h3>✅ Flask Server is Running - ESP32 Project</h3><a href='/dashboard'>Go to Dashboard</a>"
 
+# دریافت داده‌ها از ESP32
 @app.route("/data", methods=["POST"])
 def data():
     temp = request.form.get("temperature")
@@ -34,6 +35,7 @@ def data():
     print(f"✅ {date} {time} | Temp: {temp} °C | Hum: {hum} %")
     return "Data saved successfully"
 
+# گرفتن داده‌ها برای نمایش در dashboard
 @app.route("/get_data")
 def get_data():
     data = []
@@ -43,14 +45,14 @@ def get_data():
             data.append(row)
     return jsonify(data)
 
-# پاک کردن تمام داده‌ها (CSV ریست میشه)
+# پاک کردن تمام داده‌ها
 @app.route('/clear_data', methods=['POST'])
 def clear_data():
     with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
         csv.writer(f).writerow(['Date', 'Time', 'Temperature', 'Humidity'])
     return jsonify({"message": "✅ تمام داده‌ها با موفقیت حذف شدند"})
 
-# وضعیت LED
+# وضعیت LED ذخیره می‌شود در حافظه سرور
 LED_STATE = {"status": False}
 
 @app.route("/led/<state>", methods=["POST"])
@@ -61,11 +63,18 @@ def led_control(state):
         LED_STATE["status"] = False
     return jsonify(LED_STATE)
 
+# مسیر برای dashboard و مرورگر
 @app.route("/led_status")
 def led_status():
     return jsonify(LED_STATE)
 
-# داشبورد (Dark Mode)
+# 🔧 مسیر جدید مخصوص ESP32
+# این مسیر مشکل 404 را حل می‌کند
+@app.route("/get_led_status")
+def get_led_status():
+    return jsonify({"led": LED_STATE["status"]})
+
+# داشبورد آنلاین
 @app.route("/dashboard")
 def dashboard():
     return render_template_string("""
@@ -189,6 +198,6 @@ def dashboard():
 </html>
 """)
 
-# ران در حالت محلی
+# اجرای Flask در Render یا لوکال
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
